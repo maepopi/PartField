@@ -4,6 +4,7 @@ from lightning.pytorch.strategies import DDPStrategy
 from lightning.pytorch.callbacks import ModelCheckpoint
 import lightning
 import torch
+torch.set_float32_matmul_precision('high')
 import glob
 import os, sys
 import numpy as np
@@ -44,6 +45,11 @@ def predict(cfg):
     if cfg.remesh_demo:
         cfg.n_point_per_face = 10
 
+
+
+    from torch.serialization import add_safe_globals
+    import yacs.config
+    add_safe_globals([yacs.config.CfgNode])
     trainer.predict(model, ckpt_path=cfg.continue_ckpt)
         
 def main():
