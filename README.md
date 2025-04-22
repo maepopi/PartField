@@ -48,6 +48,34 @@ conda env create -f environment.yml
 conda activate partfield
 ```
 
+
+⚠️ If you have a RTX 5090, do this instead, but make sure you are under CUDA 12.8 (you can use sudo update-alternatives)
+
+```
+conda create -n partfield python=3.10
+conda activate partfield
+pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+pip install psutil
+pip install lightning==2.2 h5py yacs trimesh scikit-image loguru boto3
+pip install mesh2sdf tetgen pymeshlab plyfile einops libigl polyscope potpourri3d simple_parsing arrgh open3d
+pip install torch-scatter # Takes some time because it will need to be rebuilt 
+sudo apt install libx11-6 libgl1 libxrender1
+pip install vtk
+```
+
+If you have an error saying 
+```
+libstdc++.so.6: version GLIBCXX_3.4.32 not found
+```
+
+You can fix it by doing this
+```
+conda install -c conda-forge libstdcxx-ng
+```
+
+
+
+
 ## TLDR
 1. Input data (`.obj` or `.glb` for meshes, `.ply` for splats) are stored in subfolders under `data/`. You can create a new subfolder and copy your custom files into it.  
 2. Extract PartField features by running the script `partfield_inference.py`, passing the arguments `result_name [FEAT_FOL]` and `dataset.data_path [DATA_PATH]`. The output features will be saved in `exp_results/partfield_features/[FEAT_FOL]`.  
