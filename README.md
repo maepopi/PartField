@@ -1,7 +1,9 @@
-# PartField: Learning 3D Feature Fields for Part Segmentation and Beyond
+# PartField: Learning 3D Feature Fields for Part Segmentation and Beyond [ICCV 2025]
 **[[Project]](https://research.nvidia.com/labs/toronto-ai/partfield-release/)** **[[PDF]](https://arxiv.org/pdf/2504.11451)**
 
 Minghua Liu*, Mikaela Angelina Uy*, Donglai Xiang, Hao Su, Sanja Fidler, Nicholas Sharp, Jun Gao
+
+
 
 ## Overview
 ![Alt text](assets/teaser.png)
