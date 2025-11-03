@@ -6,6 +6,7 @@ import threading
 import queue
 import time
 from pathlib import Path
+from datetime import datetime
 import trimesh
 
 # Get the directory where this script is located (should be PartField root)
@@ -107,7 +108,7 @@ def run_command_streaming(cmd, cwd=None, output_buffer=""):
     return output_buffer
 
 
-def segment_model_generator(model_name, num_clusters):
+def segment_model_generator(model_name, num_clusters, timestamp_prefix):
     """Run partfield_inference.py and run_part_clustering.py, yielding output in real-time"""
     if model_name is None or model_name == "":
         yield "Error: Please load a model first.", ""
@@ -122,9 +123,9 @@ def segment_model_generator(model_name, num_clusters):
     output_buffer += "=" * 80 + "\n"
     yield output_buffer, ""
     
-    # Paths
+    # Paths with timestamp prefix
     model_dir = os.path.join("data", model_name)
-    result_name = f"partfield_features/{model_name}"
+    result_name = f"partfield_features/{timestamp_prefix}_{model_name}"
     config_path = "configs/final/demo.yaml"
     checkpoint_path = "model/model_objaverse.ckpt"
     
@@ -160,8 +161,8 @@ def segment_model_generator(model_name, num_clusters):
     output_buffer += "=" * 80 + "\n"
     yield output_buffer, ""
     
-    root_dir = f"exp_results/partfield_features/{model_name}"
-    dump_dir = f"exp_results/clustering/{model_name}"
+    root_dir = f"exp_results/partfield_features/{timestamp_prefix}_{model_name}"
+    dump_dir = f"exp_results/clustering/{timestamp_prefix}_{model_name}"
     
     clustering_cmd = [
         "python", "-u", "run_part_clustering.py",
@@ -180,7 +181,8 @@ def segment_model_generator(model_name, num_clusters):
         output_buffer += "\n" + "=" * 80 + "\n"
         output_buffer += "✓ Clustering completed successfully!\n"
         output_buffer += f"✓ Results saved to: {dump_dir}\n"
-        yield output_buffer, model_name
+        # Return the timestamped model name for subsequent operations
+        yield output_buffer, f"{timestamp_prefix}_{model_name}"
     except Exception as e:
         output_buffer += f"\n✗ Error during clustering: {e}\n"
         yield output_buffer, ""
@@ -234,8 +236,54 @@ def convert_all_ply_to_glb(model_name):
     return glb_files
 
 
+def get_all_runs():
+    """Get list of all segmentation runs (timestamped folders)"""
+    clustering_dir = os.path.join(SCRIPT_DIR, "exp_results", "clustering")
+    
+    if not os.path.exists(clustering_dir):
+        return []
+    
+    runs = []
+    for folder_name in sorted(os.listdir(clustering_dir), reverse=True):  # Newest first
+        folder_path = os.path.join(clustering_dir, folder_name)
+        if os.path.isdir(folder_path):
+            runs.append(folder_name)
+    
+    return runs
+
+def get_glb_files_for_run(run_folder_name):
+    """Get all GLB files from a specific run folder"""
+    clustering_dir = os.path.join(SCRIPT_DIR, "exp_results", "clustering")
+    model_dir = os.path.join(clustering_dir, run_folder_name)
+    
+    if not os.path.exists(model_dir):
+        return []
+    
+    glb_dir = os.path.join(model_dir, "glb")
+    if not os.path.exists(glb_dir):
+        return []
+    
+    # Check if GLB files exist, if not, try to convert from PLY
+    glb_files_in_dir = [f for f in os.listdir(glb_dir) if f.endswith(".glb")]
+    
+    if not glb_files_in_dir:
+        # Try to convert PLY files to GLB
+        convert_all_ply_to_glb(run_folder_name)
+        glb_files_in_dir = [f for f in os.listdir(glb_dir) if f.endswith(".glb")]
+    
+    glb_files = []
+    for glb_filename in sorted(glb_files_in_dir):
+        glb_path = os.path.abspath(os.path.join(glb_dir, glb_filename))
+        if os.path.exists(glb_path):
+            glb_files.append({
+                "name": f"{run_folder_name}/{glb_filename}",
+                "path": glb_path
+            })
+    
+    return glb_files
+
 def get_all_glb_files():
-    """Get all GLB files from all previous segmentations"""
+    """Get all GLB files from all previous segmentations (including timestamped folders)"""
     clustering_dir = os.path.join(SCRIPT_DIR, "exp_results", "clustering")
     
     if not os.path.exists(clustering_dir):
@@ -243,32 +291,14 @@ def get_all_glb_files():
     
     all_glb_files = []
     
-    # Iterate through all model directories
-    for model_name in sorted(os.listdir(clustering_dir)):
-        model_dir = os.path.join(clustering_dir, model_name)
+    # Iterate through all model directories (now with timestamp prefixes)
+    for folder_name in sorted(os.listdir(clustering_dir), reverse=True):  # Reverse to show newest first
+        model_dir = os.path.join(clustering_dir, folder_name)
         if not os.path.isdir(model_dir):
             continue
         
-        glb_dir = os.path.join(model_dir, "glb")
-        if not os.path.exists(glb_dir):
-            continue
-        
-        # Check if GLB files exist, if not, try to convert from PLY
-        glb_files_in_dir = [f for f in os.listdir(glb_dir) if f.endswith(".glb")]
-        
-        if not glb_files_in_dir:
-            # Try to convert PLY files to GLB
-            convert_all_ply_to_glb(model_name)
-            glb_files_in_dir = [f for f in os.listdir(glb_dir) if f.endswith(".glb")]
-        
-        # Add all GLB files from this model
-        for glb_filename in sorted(glb_files_in_dir):
-            glb_path = os.path.abspath(os.path.join(glb_dir, glb_filename))
-            if os.path.exists(glb_path):
-                all_glb_files.append({
-                    "name": f"{model_name}/{glb_filename}",
-                    "path": glb_path
-                })
+        glb_files = get_glb_files_for_run(folder_name)
+        all_glb_files.extend(glb_files)
     
     return all_glb_files
 
@@ -323,8 +353,15 @@ with gr.Blocks(title="PartField Segmentation") as app:
         
         # Tab 2: Gallery of all models
         with gr.Tab("Model Gallery"):
-            refresh_btn = gr.Button("Refresh Gallery", variant="secondary")
-            gallery_info = gr.Markdown("Click 'Refresh Gallery' to load all models.")
+            with gr.Row():
+                refresh_btn = gr.Button("Refresh Gallery", variant="secondary")
+                run_filter_dropdown = gr.Dropdown(
+                    label="Filter by Run (or 'All Runs')",
+                    choices=["All Runs"],
+                    value="All Runs",
+                    interactive=True
+                )
+            gallery_info = gr.Markdown("Click 'Refresh Gallery' to load models.")
             
             # Create grid of Model3D viewers (up to 50 models)
             gallery_viewers = []
@@ -340,33 +377,65 @@ with gr.Blocks(title="PartField Segmentation") as app:
                                 viewer = gr.Model3D(visible=False, show_label=False)
                                 gallery_viewers.append((viewer_label, viewer))
     
-    def populate_gallery(max_viewers):
-        """Populate gallery with all models"""
-        all_glb_files = get_all_glb_files()
-        
-        if not all_glb_files:
-            # Hide all viewers and show message
-            updates = [gr.Markdown("No models found. Generate some segmentations first!", visible=True)]
-            for i in range(max_viewers):
-                updates.append(gr.Markdown(visible=False))
-                updates.append(gr.Model3D(visible=False))
-            return updates
-        
-        num_models = len(all_glb_files)
+    def update_run_filter():
+        """Update the run filter dropdown with available runs"""
+        all_runs = get_all_runs()
+        if not all_runs:
+            return gr.Dropdown(choices=["All Runs"], value=None)
+        choices = ["All Runs", "Most Recent Run"] + all_runs
+        return gr.Dropdown(choices=choices, value="Most Recent Run" if all_runs else "All Runs")
+    
+    def populate_gallery(max_viewers, selected_run):
+        """Populate gallery with models - resets all viewers first"""
         updates = []
         
-        # Update info
-        updates.append(gr.Markdown(f"### Displaying {num_models} models", visible=True))
+        # Reset all viewers first by setting value to None
+        # This clears any previous models from the viewers
         
-        # Update each viewer
+        # Get GLB files based on filter
+        if not selected_run or selected_run == "All Runs":
+            # Show all runs
+            glb_files = get_all_glb_files()
+            run_info = f"### Displaying {len(glb_files)} models from all runs"
+        elif selected_run == "Most Recent Run":
+            # Show only the most recent run
+            all_runs = get_all_runs()
+            if all_runs:
+                most_recent = all_runs[0]  # Already sorted newest first
+                glb_files = get_glb_files_for_run(most_recent)
+                run_info = f"### Displaying {len(glb_files)} models from most recent run: {most_recent}"
+            else:
+                glb_files = []
+                run_info = "### No runs found"
+        else:
+            # Show only selected run
+            glb_files = get_glb_files_for_run(selected_run)
+            run_info = f"### Displaying {len(glb_files)} models from run: {selected_run}"
+        
+        if not glb_files:
+            # Hide all viewers and show message
+            updates.append(gr.Markdown("No models found. Generate some segmentations first!", visible=True))
+            for i in range(max_viewers):
+                updates.append(gr.Markdown(visible=False))
+                updates.append(gr.Model3D(value=None, visible=False))  # Reset to None
+            return updates
+        
+        num_models = len(glb_files)
+        
+        # Update info
+        updates.append(gr.Markdown(run_info, visible=True))
+        
+        # Update each viewer - reset all first, then populate visible ones with new values
         for i in range(max_viewers):
             if i < num_models:
-                item = all_glb_files[i]
+                item = glb_files[i]
                 updates.append(gr.Markdown(f"**{item['name']}**", visible=True))
+                # Set the new model path - this will replace any previous model
                 updates.append(gr.Model3D(value=item["path"], visible=True))
             else:
+                # Reset unused viewers to None and hide them
                 updates.append(gr.Markdown(visible=False))
-                updates.append(gr.Model3D(visible=False))
+                updates.append(gr.Model3D(value=None, visible=False))
         
         return updates
     
@@ -382,11 +451,14 @@ with gr.Blocks(title="PartField Segmentation") as app:
             yield load_message, gr.Dropdown(choices=[], value=None), None, None
             return
         
+        # Generate timestamp prefix (YYMMDD-HHMMSS format)
+        timestamp = datetime.now().strftime("%y%m%d-%H%M%S")
+        
         # Run segmentation with streaming output
         completed_model_name = ""
         terminal_output_text = ""
         
-        for terminal_output_text, completed_model_name in segment_model_generator(model_name, num_clusters):
+        for terminal_output_text, completed_model_name in segment_model_generator(model_name, num_clusters, timestamp):
             yield terminal_output_text, gr.Dropdown(choices=[], value=None), None, completed_model_name or None
         
         # After completion, convert all PLY files to GLB
@@ -434,15 +506,33 @@ with gr.Blocks(title="PartField Segmentation") as app:
         gallery_outputs.extend([label, viewer])
     
     refresh_btn.click(
-        fn=lambda: populate_gallery(max_viewers),
+        fn=lambda: update_run_filter(),
         inputs=[],
+        outputs=run_filter_dropdown
+    ).then(
+        fn=lambda run: populate_gallery(max_viewers, run),
+        inputs=run_filter_dropdown,
+        outputs=[gallery_info] + gallery_outputs
+    )
+    
+    run_filter_dropdown.change(
+        fn=lambda run: populate_gallery(max_viewers, run),
+        inputs=run_filter_dropdown,
         outputs=[gallery_info] + gallery_outputs
     )
     
     # Load gallery on app start
+    def load_gallery_on_start():
+        runs = update_run_filter()
+        return runs
+    
     app.load(
-        fn=lambda: populate_gallery(max_viewers),
+        fn=lambda: update_run_filter(),
         inputs=[],
+        outputs=run_filter_dropdown
+    ).then(
+        fn=lambda run: populate_gallery(max_viewers, run or "Most Recent Run"),
+        inputs=run_filter_dropdown,
         outputs=[gallery_info] + gallery_outputs
     )
 
