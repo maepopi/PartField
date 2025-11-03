@@ -91,11 +91,11 @@ class Model(pl.LightningModule):
         view_id = 0
         starttime = time.time()
         
-        if uid == "car" or uid == "complex_car":
+        # if uid == "car" or uid == "complex_car":
         # if uid == "complex_car":
-            print("Skipping this for now.")
-            print(uid)
-            return
+        #     print("Skipping this for now.")
+        #     print(uid)
+        #     return
 
         ### Skip if model already processed
         if os.path.exists(f'{save_dir}/part_feat_{uid}_{view_id}.npy') or os.path.exists(f'{save_dir}/part_feat_{uid}_{view_id}_batch.npy'):
