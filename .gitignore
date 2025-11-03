@@ -1,0 +1,17 @@
+*.glb
+*.obj
+*.ply
+*.yaml
+*.pyc
+*.ini
+*.ckpt
+*.pth
+*.pt
+*.pkl
+*.pt
+*.pkl
+*.pkl
+/data
+/exp_results
+applications/.polyscope.ini
+configs/final/demo.yaml
