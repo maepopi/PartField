@@ -234,6 +234,45 @@ def convert_all_ply_to_glb(model_name):
     return glb_files
 
 
+def get_all_glb_files():
+    """Get all GLB files from all previous segmentations"""
+    clustering_dir = os.path.join(SCRIPT_DIR, "exp_results", "clustering")
+    
+    if not os.path.exists(clustering_dir):
+        return []
+    
+    all_glb_files = []
+    
+    # Iterate through all model directories
+    for model_name in sorted(os.listdir(clustering_dir)):
+        model_dir = os.path.join(clustering_dir, model_name)
+        if not os.path.isdir(model_dir):
+            continue
+        
+        glb_dir = os.path.join(model_dir, "glb")
+        if not os.path.exists(glb_dir):
+            continue
+        
+        # Check if GLB files exist, if not, try to convert from PLY
+        glb_files_in_dir = [f for f in os.listdir(glb_dir) if f.endswith(".glb")]
+        
+        if not glb_files_in_dir:
+            # Try to convert PLY files to GLB
+            convert_all_ply_to_glb(model_name)
+            glb_files_in_dir = [f for f in os.listdir(glb_dir) if f.endswith(".glb")]
+        
+        # Add all GLB files from this model
+        for glb_filename in sorted(glb_files_in_dir):
+            glb_path = os.path.abspath(os.path.join(glb_dir, glb_filename))
+            if os.path.exists(glb_path):
+                all_glb_files.append({
+                    "name": f"{model_name}/{glb_filename}",
+                    "path": glb_path
+                })
+    
+    return all_glb_files
+
+
 # Create Gradio interface
 with gr.Blocks(title="PartField Segmentation") as app:
     gr.Markdown("# PartField Model Segmentation")
@@ -241,43 +280,95 @@ with gr.Blocks(title="PartField Segmentation") as app:
     
     model_name_state = gr.State(value=None)
     
-    with gr.Row():
-        with gr.Column(scale=1):
-            file_input = gr.File(
-                label="Upload Model File",
-                file_types=[".glb", ".obj", ".ply"]
-            )
-            num_clusters = gr.Slider(
-                minimum=1,
-                maximum=100,
-                value=20,
-                step=1,
-                label="Number of Clusters"
-            )
-            segment_btn = gr.Button("Segment", variant="primary", size="lg")
-    
-    with gr.Row():
-        with gr.Column(scale=1):
-            terminal_output = gr.Textbox(
-                label="Terminal Output",
-                lines=25,
-                interactive=False,
-                show_copy_button=True,
-                autoscroll=True
-            )
+    with gr.Tabs() as tabs:
+        # Tab 1: Generation
+        with gr.Tab("Generation"):
+            with gr.Row():
+                with gr.Column(scale=1):
+                    file_input = gr.File(
+                        label="Upload Model File",
+                        file_types=[".glb", ".obj", ".ply"]
+                    )
+                    num_clusters = gr.Slider(
+                        minimum=1,
+                        maximum=100,
+                        value=20,
+                        step=1,
+                        label="Number of Clusters"
+                    )
+                    segment_btn = gr.Button("Segment", variant="primary", size="lg")
+            
+            with gr.Row():
+                with gr.Column(scale=1):
+                    terminal_output = gr.Textbox(
+                        label="Terminal Output",
+                        lines=25,
+                        interactive=False,
+                        show_copy_button=True,
+                        autoscroll=True
+                    )
+                
+                with gr.Column(scale=1):
+                    gr.Markdown("### Model Viewer")
+                    model_dropdown = gr.Dropdown(
+                        label="Select Segmentation Result",
+                        choices=[],
+                        value=None,
+                        interactive=True
+                    )
+                    model_viewer = gr.Model3D(
+                        label="3D Model",
+                        show_label=True
+                    )
         
-        with gr.Column(scale=1):
-            gr.Markdown("### Model Viewer")
-            model_dropdown = gr.Dropdown(
-                label="Select Segmentation Result",
-                choices=[],
-                value=None,
-                interactive=True
-            )
-            model_viewer = gr.Model3D(
-                label="3D Model",
-                show_label=True
-            )
+        # Tab 2: Gallery of all models
+        with gr.Tab("Model Gallery"):
+            refresh_btn = gr.Button("Refresh Gallery", variant="secondary")
+            gallery_info = gr.Markdown("Click 'Refresh Gallery' to load all models.")
+            
+            # Create grid of Model3D viewers (up to 50 models)
+            gallery_viewers = []
+            max_viewers = 50
+            
+            for i in range(0, max_viewers, 2):
+                with gr.Row():
+                    for j in range(2):
+                        idx = i + j
+                        if idx < max_viewers:
+                            with gr.Column():
+                                viewer_label = gr.Markdown("", visible=False)
+                                viewer = gr.Model3D(visible=False, show_label=False)
+                                gallery_viewers.append((viewer_label, viewer))
+    
+    def populate_gallery(max_viewers):
+        """Populate gallery with all models"""
+        all_glb_files = get_all_glb_files()
+        
+        if not all_glb_files:
+            # Hide all viewers and show message
+            updates = [gr.Markdown("No models found. Generate some segmentations first!", visible=True)]
+            for i in range(max_viewers):
+                updates.append(gr.Markdown(visible=False))
+                updates.append(gr.Model3D(visible=False))
+            return updates
+        
+        num_models = len(all_glb_files)
+        updates = []
+        
+        # Update info
+        updates.append(gr.Markdown(f"### Displaying {num_models} models", visible=True))
+        
+        # Update each viewer
+        for i in range(max_viewers):
+            if i < num_models:
+                item = all_glb_files[i]
+                updates.append(gr.Markdown(f"**{item['name']}**", visible=True))
+                updates.append(gr.Model3D(value=item["path"], visible=True))
+            else:
+                updates.append(gr.Markdown(visible=False))
+                updates.append(gr.Model3D(visible=False))
+        
+        return updates
     
     def segment_and_update(file, num_clusters):
         """Handle segmentation button click - runs segmentation and prepares GLB files"""
@@ -324,6 +415,7 @@ with gr.Blocks(title="PartField Segmentation") as app:
             return glb_path
         return None
     
+    
     segment_btn.click(
         fn=segment_and_update,
         inputs=[file_input, num_clusters],
@@ -334,6 +426,24 @@ with gr.Blocks(title="PartField Segmentation") as app:
         fn=update_viewer_from_dropdown,
         inputs=[model_dropdown, model_name_state],
         outputs=model_viewer
+    )
+    
+    # Flatten gallery_viewers for outputs
+    gallery_outputs = []
+    for label, viewer in gallery_viewers:
+        gallery_outputs.extend([label, viewer])
+    
+    refresh_btn.click(
+        fn=lambda: populate_gallery(max_viewers),
+        inputs=[],
+        outputs=[gallery_info] + gallery_outputs
+    )
+    
+    # Load gallery on app start
+    app.load(
+        fn=lambda: populate_gallery(max_viewers),
+        inputs=[],
+        outputs=[gallery_info] + gallery_outputs
     )
 
 if __name__ == "__main__":
