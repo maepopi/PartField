@@ -56,7 +56,7 @@ conda activate partfield
 ```
 conda create -n partfield python=3.10
 conda activate partfield
-pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu128
 pip install psutil
 pip install lightning==2.2 h5py yacs trimesh scikit-image loguru boto3
 pip install mesh2sdf tetgen pymeshlab plyfile einops libigl polyscope potpourri3d simple_parsing arrgh open3d
